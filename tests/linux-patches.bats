@@ -273,6 +273,65 @@ JS
 	node_check "$FIX"
 }
 
+@test "deeplink: widens the guard when it ends a comma sequence (1.6.1264+)" {
+	cat > "$FIX" <<'JS'
+function L(x){}function B(x){return x}let t;
+if(t=app.setAsDefaultProtocolClient("wispr-flow"),app.on("open-url",(e,t)=>{L(t)}),A.H8){const e=B(process.argv.find(e=>e.startsWith("wispr-flow:")||e.startsWith("wispr-flow/")));e&&L(e)}
+JS
+	run bash "$PATCH_DIR/linux-deeplink.sh" "$FIX"
+	[[ "$status" -eq 0 ]]
+	grep -qF ',A.H8||"linux"===process.platform){/*WISPR_LINUX_DEEPLINK*/' "$FIX"
+	node_check "$FIX"
+}
+
+@test "deeplink: refuses a negated guard (near-miss for the anchor)" {
+	# `if(!f.H8)` is a different condition; widening it with `||linux` would
+	# invert the meaning, so the anchor must not take it.
+	cat > "$FIX" <<'JS'
+function L(x){}function B(x){return x}
+if(!f.H8){const e=B(process.argv.find(e=>e.startsWith("wispr-flow:")||e.startsWith("wispr-flow/")));e&&L(e)}
+JS
+	run bash "$PATCH_DIR/linux-deeplink.sh" "$FIX"
+	[[ "$status" -ne 0 ]]
+	! grep -q 'WISPR_LINUX_DEEPLINK' "$FIX"
+}
+
+@test "deeplink: refuses a guard that ends an && chain (near-miss for the lead)" {
+	# `if(a&&f.H8)` widened to `a&&f.H8||linux` would skip `a` on Linux:
+	# only `if(` and `,` are safe leads.
+	cat > "$FIX" <<'JS'
+function L(x){}function B(x){return x}var a=!0;
+if(a&&f.H8){const e=B(process.argv.find(e=>e.startsWith("wispr-flow:")||e.startsWith("wispr-flow/")));e&&L(e)}
+JS
+	run bash "$PATCH_DIR/linux-deeplink.sh" "$FIX"
+	[[ "$status" -ne 0 ]]
+	! grep -q 'WISPR_LINUX_DEEPLINK' "$FIX"
+}
+
+@test "deeplink: refuses a while( guard (near-miss for the if( lead)" {
+	# A bare `(` lead would widen this into valid but different JS.
+	cat > "$FIX" <<'JS'
+function L(x){}function B(x){return x}
+while(f.H8){const e=B(process.argv.find(e=>e.startsWith("wispr-flow:")||e.startsWith("wispr-flow/")));e&&L(e);break}
+JS
+	run bash "$PATCH_DIR/linux-deeplink.sh" "$FIX"
+	[[ "$status" -ne 0 ]]
+	! grep -q 'WISPR_LINUX_DEEPLINK' "$FIX"
+}
+
+@test "deeplink: a parameter list after a comma fails loudly, file restored" {
+	# `,e){` also ends a parameter list; the rewrite there does not parse, so
+	# the syntax check must reject it and restore the original bytes.
+	cat > "$FIX" <<'JS'
+function L(x){}function B(x){return x}
+function q(a,e){const t=B(process.argv.find(e=>e.startsWith("wispr-flow:")||e.startsWith("wispr-flow/")));t&&L(t)}
+JS
+	cp "$FIX" "$FIX.before"
+	run bash "$PATCH_DIR/linux-deeplink.sh" "$FIX"
+	[[ "$status" -ne 0 ]]
+	cmp -s "$FIX" "$FIX.before"
+}
+
 @test "deeplink: idempotent on second run" {
 	cat > "$FIX" <<'JS'
 function L(x){}function B(x){return x}
